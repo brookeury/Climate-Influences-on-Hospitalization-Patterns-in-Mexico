@@ -1,9 +1,3 @@
----
-title: "modeling_3_5"
-author: "Brooke Ury"
-date: "2025-03-06"
-output: pdf_document
----
 
 ```{r}
 library(dplyr)
