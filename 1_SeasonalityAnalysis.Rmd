@@ -1,0 +1,414 @@
+---
+title: "All_ICD_4_29"
+author: "Brooke Ury"
+date: "2025-04-29"
+output: pdf_document
+---
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(circular)
+library(RColorBrewer)
+library(viridis)
+library(doBy)
+library(fields)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(pals)
+library(tidyr)
+library(ISOweek)
+library(lomb)
+library(purrr)
+library(WaveletComp)
+```
+
+#load data. This dataset is a clean version of the hosptialization data that contains aggregated hopstialization counts for each major ICD category for each state, week, and year
+```{r}
+df_icd <- read.csv("/csv_new/df_allyears_withicd_with2009.csv")
+```
+
+# Summing total_count for each ICDcategory to confirm sufficient cases for analyses
+```{r}
+counts_ICD <- df_icd %>%
+  group_by(ICDcategory) %>%
+  summarise(total_count = sum(total_count))
+
+print(counts_ICD)
+```
+
+#plot the number of cases over time (to create Supplemental Figure 1)
+```{r}
+# Title mapping
+category_titles <- list(
+  j = "Respiratory System (ICD J)",
+  k = "Digestive System (ICD K)",
+  l = "Skin (ICD L)",
+  m = "Musculoskeletal (ICD M)",
+  n = "Genitourinary System (ICD N)",
+  o = "Pregnancy and Childbirth (ICD O)",
+  p = "Perinatal Period (ICD P)",
+  q = "Congenital Malformations (ICD Q)",
+  s = "Injury (ICD S/T)"
+)
+
+# Categories to loop through
+categories <- c("j", "k", "l", "m", "n", "o", "p", "q", "s")
+
+# Store plots
+plot_list <- list()
+
+for (category in categories) {
+
+  # Handle s = "s OR t"
+  if (category == "s") {
+    category_filter <- df_icd %>% filter(ICDcategory %in% c("s", "t"))
+  } else {
+    category_filter <- df_icd %>% filter(ICDcategory == category)
+  }
+
+  # Summarize weekly data
+  summary_data <- category_filter %>%
+    group_by(week, year) %>%
+    summarize(total_weekly_count = sum(total_count), .groups = 'drop') %>%
+    mutate(date = as.Date(paste0(year, "-W", sprintf("%02d", week), "-1"), format = "%Y-W%U-%u"))
+
+  # Build plot
+  p <- ggplot(summary_data, aes(x = date, y = total_weekly_count)) +
+    geom_line(color = "black", linewidth = 0.2) +
+    labs(
+      title = category_titles[[category]],
+      x = "Year",
+      y = "Weekly Hospitalizations"
+    ) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "Arial"),
+      axis.text.x = element_text(size = 5, hjust = 0.5),
+      axis.text.y = element_text(size = 4),
+      axis.title.y = element_text(size = 5),
+      axis.title.x = element_text(size = 8),
+      axis.text = element_text(size = 4),
+      plot.title = element_text(size = 8, hjust = 0.5),
+      plot.margin = margin(10, 10, 10, 10),
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", size = 0.5)
+    )
+
+  # Save plot to list
+  plot_list[[category]] <- p
+}
+
+# Combine and display all plots in 3 columns
+wrap_plots(plot_list, ncol = 3)
+```
+
+#load geographic information for Mexio
+```{r}
+mexico <- ne_states(country = "Mexico", returnclass = "sf")
+```
+
+#map the mexico geographic dataset to the state numbers in the hospitalizations dataset
+```{r}
+state_mapping <- data.frame(
+  name = c(
+    "Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Coahuila",
+    "Colima", "Chiapas", "Chihuahua", "Distrito Federal", "Durango", "Guanajuato", "Guerrero",
+    "Hidalgo", "Jalisco", "México", "Michoacán", "Morelos", "Nayarit", "Nuevo León",
+    "Oaxaca", "Puebla", "Querétaro", "Quintana Roo", "San Luis Potosí", "Sinaloa",
+    "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz", "Yucatán", "Zacatecas"
+  ),
+  ENTIDAD = 1:32
+)
+
+mexico_map_df <- mexico %>%
+  left_join(state_mapping, by = "name")
+```
+
+#pull out coordinates
+```{r}
+long_lat_df <- mexico_map_df %>%
+  dplyr::select(ENTIDAD, latitude, longitude)
+```
+
+#create heatplots of all major ICD disease categories, where the average weekly cases in a state are normed by the average and organized by the latitude of each state (corresponding to Figure 1)
+```{r}
+# List of variables with corresponding titles
+variable_titles <- c(
+  a = "ICD A",
+  b = "ICD B",
+  c = "ICD C",
+  d = "ICD D",
+  e = "ICD E",
+  f = "ICD F",
+  g = "ICD G",
+  h = "ICD H",
+  i = "ICD I",
+  j = "ICD J",
+  k = "ICD K",
+  l = "ICD L",
+  m = "ICD M",
+  n = "ICD N",
+  o = "ICD O",
+  p = "ICD P",
+  q = "ICD Q",
+  t = "ICD S/T",
+  s = "test"
+)
+
+# List of variables to iterate over, excluding 'V', 'W', 'X', 'U', and 'Y'
+variables <- c("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "t", "s")
+
+# Loop through each variable
+for (var in variables) {
+  if (var == "t") {
+    df_clean_avgyear <- df_icd %>%
+      filter(ICDcategory %in% c("s", "t")) #case for s and t, which are combined
+  } else {
+    df_clean_avgyear <- df_icd %>%
+      filter(ICDcategory == var)
+  }
+  
+  # Group and summarize the data
+  df_clean_avgyear <- df_clean_avgyear %>%
+    group_by(week, ENTIDAD) %>%
+    summarise(avg_cases = mean(total_count), .groups = 'drop') %>%
+    filter(week != 1 & week != 52)
+  
+  # Join with latitude data
+  df_clean_avgyear <- df_clean_avgyear %>%
+    left_join(long_lat_df, by = "ENTIDAD")
+  
+  # Create a list of entities with their latitude
+  entidad_list <- long_lat_df %>%
+    dplyr::select(ENTIDAD, latitude) %>%
+    filter(!is.na(ENTIDAD))
+  
+   #sort by latitude
+  entidad_list <- entidad_list[order(entidad_list$latitude), ]
+  
+  #create the output matrix
+  out_matrix <- NULL
+  
+  #calcualte the average cases normlaized by the mean for each state for each week
+  for(i in 1:nrow(entidad_list)) {
+    sub <- df_clean_avgyear[df_clean_avgyear$ENTIDAD == entidad_list$ENTIDAD[i],] 
+    weekly_sums <- summaryBy(avg_cases ~ week, data = sub, na.rm = TRUE)  # Average weekly cases in that state
+    weekly_sums$avg_cases.mean <- weekly_sums$avg_cases.mean / max(weekly_sums$avg_cases.mean)  # Normalize by the mean
+    out_matrix <- rbind(out_matrix, weekly_sums$avg_cases.mean)
+  }
+  
+  #formatting for plot
+  par(family = "Arial")
+  par(mar = c(4, 4, 3, 1),
+    mgp = c(2.2, 0.7, 0))
+  par(plt = c(0.35, 0.6, 0.15, 0.88)) 
+ 
+  # Create the plot
+  image.plot(
+    z = t(out_matrix), 
+    col = parula(20),  
+    ylab = "Latitude", 
+    xlab = "Week",      
+    xaxt = "n", 
+    yaxt = "n",         
+    main = variable_titles[var],  
+    cex.lab = 2,     
+    cex.axis = 2,    
+    cex.main = 2.6, 
+    font.main = 1      
+  )
+  
+  # Define week positions and set x-axis ticks
+  week_positions <- seq(0, ncol(out_matrix), by = 0.25)
+  axis(1, at = week_positions[1:5], labels = c(1, 13, 26, 39, 52), cex.axis = 1.2)
+}
+```
+
+
+#Loop to conduct a fourier transform for each major ICD category (corresponding to Figure 2)
+```{r}
+# Cleaned-up ICD titles
+variable_titles <- c(
+  a = "ICD A",
+  b = "ICD B",
+  c = "ICD C",
+  d = "ICD D",
+  e = "ICD E",
+  f = "ICD F",
+  g = "ICD G",
+  h = "ICD H",
+  i = "ICD I",
+  j = "ICD J",
+  k = "ICD K",
+  l = "ICD L",
+  m = "ICD M",
+  n = "ICD N",
+  o = "ICD O",
+  p = "ICD P",
+  q = "ICD Q",
+  t = "S/T",
+  s = "test"
+)
+
+# List of categories to loop through
+icd_categories <- c("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "t", "s", "a")
+
+# Loop through the variables and plot
+walk(icd_categories, function(cat) {
+  
+  #sum across states
+  if (cat == "t") {
+    df_cat <- df_icd %>%
+      filter(ICDcategory %in% c("s", "t")) %>% #special case to combine s and t
+      group_by(year, week) %>%
+      summarise(total_count = sum(total_count), .groups = "drop") %>%
+      mutate(date = as.Date(paste(year, week, 1, sep = "-"), format = "%Y-%U-%u")) %>%
+      arrange(date)
+  } else {
+    df_cat <- df_icd %>%
+      filter(ICDcategory == cat) %>%
+      group_by(year, week) %>%
+      summarise(total_count = sum(total_count), .groups = "drop") %>%
+      mutate(date = as.Date(paste(year, week, 1, sep = "-"), format = "%Y-%U-%u")) %>%
+      arrange(date)
+  }
+  
+  if (nrow(df_cat) < 10) {
+    message("Skipping category ", cat, ": insufficient data.")
+    return(NULL)
+  }
+
+  # Convert dates to numeric weeks
+  df_cat$time_numeric <- as.numeric(difftime(df_cat$date, min(df_cat$date), units = "days"))
+  df_cat$time_weeks <- df_cat$time_numeric / 7
+
+  # Run Lomb-Scargle Periodogram (no plot)
+  ls_result <- lsp(
+    x = df_cat$total_count,
+    times = df_cat$time_weeks,
+    type = "period",
+    from = 2,
+    to = 156,
+    ofac = 4,
+    alpha = 0.01,
+    normalize = "standard",
+    plot = FALSE
+  )
+
+  # Extract periodogram data
+  df_psd <- data.frame(
+    period = ls_result$scanned,
+    power = ls_result$power
+  )
+
+  threshold <- ls_result$sig.level # Significance threshold
+
+  # Plot the result
+  p <- ggplot(df_psd, aes(x = period, y = power)) +
+    geom_line(linewidth = 0.75) +
+    geom_hline(yintercept = threshold, linetype = "dashed", color = "red", linewidth = 0.75) +
+    annotate(
+      "text",
+      x = max(df_psd$period),
+      y = threshold - 0.05 * diff(range(df_psd$power)),
+      label = paste0("p = ", ls_result$alpha),
+      color = "red",
+      size = 6,
+      hjust = 1,
+      family = "Arial"
+    ) +
+    labs(
+      title = variable_titles[[cat]],
+      x = "Period (weeks)",
+      y = "Normalized Power"
+    ) +
+    theme_minimal(base_family = "Arial") +
+    theme(
+      plot.title = element_text(size = 29, hjust = 0.5),
+      axis.title.x = element_text(size = 24),
+      axis.title.y = element_text(size = 24),
+      axis.text.x = element_text(size = 14),
+      axis.text.y = element_text(size = 14),
+      plot.margin = margin(15, 5, 15, 5),
+      text = element_text(family = "Arial")
+    )
+  
+  # Print the plot
+  print(p)
+})
+```
+
+
+#code to create wavelet plot of all ICD categories, corresponding to Figure 3
+```{r}
+# this code uses the same variable titles and categories from the fourier transform plot
+
+walk(icd_categories, function(cat) {
+
+  #sum across states
+  if (cat == "t") {
+    df_cat <- df_icd %>%
+      filter(ICDcategory %in% c("s", "t")) %>% #special case for ICD s and t
+      group_by(year, week) %>%
+      summarise(total_count = sum(total_count), .groups = "drop") %>%
+      mutate(date = as.Date(paste(year, week, 1, sep = "-"), format = "%Y-%U-%u")) %>%
+      arrange(date)
+  } else {
+    df_cat <- df_icd %>%
+      filter(ICDcategory == cat) %>%
+      group_by(year, week) %>%
+      summarise(total_count = sum(total_count), .groups = "drop") %>%
+      mutate(date = as.Date(paste(year, week, 1, sep = "-"), format = "%Y-%U-%u")) %>%
+      arrange(date)
+  }
+
+  if (nrow(df_cat) < 10) {
+    message("Skipping category ", cat, ": insufficient data.")
+    return(NULL)
+  }
+
+  mydata <- data.frame(x = df_cat$total_count)
+
+  #conduct the wavelet analysis
+  myw <- analyze.wavelet(
+    mydata,
+    my.series = "x",
+    dt = 1/52.333,
+    lowerPeriod = 0.1,
+    upperPeriod = 4,
+    n.sim = 30
+  )
+
+  #plot the result
+  date_labels <- format(df_cat$date, "%Y")
+  year_ticks <- which(!duplicated(date_labels))
+  year_labels <- date_labels[year_ticks]
+
+  par(family = "Arial", cex.lab = 2)
+
+  wt.image(
+    myw,
+    n.levels = 250,
+    color.palette = "colorRampPalette(brewer.pal(11, 'Spectral'))(n.levels)",
+    legend.params = list(
+      lab = "Wavelet Power Levels",
+      lab.line = 3.5,
+      label.digits = 2,
+      n.ticks = 6
+    ),
+    plot.ridge = FALSE,
+    col.contour = "black",
+    graphics.reset = TRUE,
+    siglvl = 0.05,
+    spec.time.axis = list(at = year_ticks, labels = year_labels)
+  )
+
+  title(variable_titles[[cat]], line = 1.5, cex.main = 2.5, font.main = 1)
+  mtext("Year", side = 1, line = 2.5, cex = 2)
+})
+```
