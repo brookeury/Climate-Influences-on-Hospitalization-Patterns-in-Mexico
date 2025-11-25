@@ -1,0 +1,177 @@
+
+```{r}
+library(dplyr)
+library(purrr)
+library(lfe)
+library(tibble)
+```
+
+#load the datasets created for the linear temperature models (one dataset for each major ICD category, with number of hospitalizaitons for specific disease areas in each state for each week)
+```{r}
+files <- c(LETTERS[1:22], LETTERS[24], "Z")  # Files A to X and Z, without W
+
+list_of_dfs <- list()
+
+# Read all files into a list of data frames
+for (file in files) {
+  file_path <- paste0("/intermediate/df", file, ".csv") 
+  list_of_dfs[[file]] <- read.csv(file_path)
+}
+```
+
+
+#remove diseae areas with cummulatively less than 10,000 cases across states and years
+```{r}
+list_of_dfs_filtered <- map(list_of_dfs, ~ {
+  # Step 1: Count occurrences of each disease category
+  category_counts <- .x %>%
+    group_by(disease_category) %>%
+    summarize(count = n())  # Count occurrences of each disease category
+
+  # Step 2: Filter categories with counts >= 10000
+  category_counts_filtered <- category_counts %>%
+    filter(count >= 10000)
+
+  # Step 3: Filter the original data frame based on the filtered disease categories
+  .x %>%
+    filter(disease_category %in% category_counts_filtered$disease_category)
+})
+```
+
+#run the polynomial temperature fixed effect regression model across all specific disease areas
+```{r}
+# Loop over each filtered dataframe
+results_list <- imap(list_of_dfs_filtered, ~ {
+  df_filtered <- .x
+  icd_label <- .y 
+
+  # Count disease category occurrences
+  category_counts <- df_filtered %>%
+    group_by(disease_category) %>%
+    summarize(count = n(), .groups = "drop")
+
+  # Filter categories with at least 10,000 cases
+  category_counts_filtered <- category_counts %>%
+    filter(count >= 10000)
+
+  # Run model per qualifying disease_category
+  map_df(category_counts_filtered$disease_category, function(disease_cat) {
+    df_category <- df_filtered %>% filter(disease_category == disease_cat)
+
+    total_count <- category_counts_filtered %>%
+      filter(disease_category == disease_cat) %>%
+      pull(count)
+
+    model <- felm(log_cases ~ poly(temp, 4, raw = TRUE) | state + month + year | 0 | state,
+                  data = df_category)
+
+    model_summary <- summary(model)
+    f_stat_proj <- model_summary$P.fstat[4]
+
+    tibble(
+      ICD_category = icd_label,
+      disease_category = disease_cat,
+      temp_pval = f_stat_proj,
+      total_count = total_count
+    )
+  })
+})
+
+```
+
+#save the results
+```{r}
+all_results <- bind_rows(results_list, .id = "ICD_category")
+```
+
+```{r}
+write.csv(all_results, file = "/polynomial_results/all_results.csv", row.names = FALSE)
+```
+
+#filter to disease areas with at least 50,000 cases
+```{r}
+combined_results_filtered <- all_results %>%
+  filter (total_count >= 50000)
+```
+
+#create the new columns for adjusted p-values
+```{r}
+num_tests <- nrow(combined_results_filtered)
+
+combined_results_filtered <- combined_results_filtered %>%
+  mutate(
+    bonferroni_temp_pval = p.adjust(temp_pval, method = "bonferroni"), 
+    fdr_temp_pval = p.adjust(temp_pval, method = "fdr")
+  )
+```
+
+#round to 5 decimal places
+```{r}
+combined_results_filtered <- combined_results_filtered %>%
+  mutate(across(c(temp_pval, bonferroni_temp_pval, fdr_temp_pval), ~ round(.x, 5)))
+```
+
+#set order
+```{r}
+combined_results_filtered <- combined_results_filtered %>%
+  dplyr::select(ICD_category, disease_category, total_count,temp_pval, bonferroni_temp_pval, fdr_temp_pval) %>%
+  dplyr::arrange(temp_pval)
+```
+
+#save the results
+```{r}
+write.csv(combined_results_filtered, file = "/polynomial_results/combined_clean.csv", row.names = FALSE)
+```
+
+```{r}
+combined_results_filtered <- read.csv("/polynomial_results/combined_clean.csv")
+```
+
+#plot the significance of the fixed effect models, unadjusted and adjusted 
+```{r}
+ggplot(combined_results_filtered, aes(x = temp_pval)) +
+  geom_histogram(
+    breaks = seq(0, 1, by = 0.05),
+    fill = "steelblue", 
+    color = "black", 
+    alpha = 0.5
+  ) + 
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "black", size = 0.5) +
+  geom_vline(xintercept = 0.10, linetype = "dashed", color = "black", size = 0.5) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1, 0.5,1), labels = c("0",".05", ".1",".5", "1")) +
+  labs(title = "Evaluating the Significance of Temperature on\nHospitalization Rates Across Disease Areas", x = "P-Value", y = "Count") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    text = element_text(family = "Arial"), 
+    axis.title = element_text(size = 16),  
+    axis.text = element_text(size = 14),
+    plot.title = element_text(size = 24, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.x = element_blank() 
+  )
+
+ggplot(combined_results_filtered, aes(x = fdr_temp_pval)) +
+  geom_histogram(
+    breaks = seq(0, 1, by = 0.05),  
+    fill = "steelblue", 
+    color = "black", 
+    alpha = 0.5
+  ) + 
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "black", size = 0.5) +
+  geom_vline(xintercept = 0.10, linetype = "dashed", color = "black", size = 0.5) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1, 0.5,1), labels = c("0",".05", ".1",".5", "1")) +
+  labs(title = "Evaluating the Significance of Temperature on\nHospitalization Rates Across Disease Areas", x = "FDR Adjusted P-Value", y = "Count") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),  
+    text = element_text(family = "Arial"), 
+    axis.title = element_text(size = 16), 
+    axis.text = element_text(size = 14), 
+    plot.title = element_text(size = 24, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10) 
+  )
+```
+

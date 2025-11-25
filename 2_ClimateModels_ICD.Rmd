@@ -1,0 +1,5788 @@
+
+```{r}
+library(dplyr)
+library(mgcv)
+library(ggplot2)
+library(lfe)
+library(nortest)
+library(lfe)
+library(patchwork)
+library(splines)
+library(stringr)
+```
+
+Identifying Bins for Temperature and Precipitation modeling
+
+#load datasets of climate data. Average temperature and precipitation for each day for each state
+```{r}
+rain_df <- read.csv("/climate_data/precipitation_data.csv")
+temp_df <- read.csv("/climate_data/temperature_data.csv")
+```
+
+#average precipitation over each week
+```{r}
+rain_df$date <- as.Date(rain_df$date)
+
+rain_df <- rain_df %>%
+  mutate(week = week(date))
+
+# Group by 'year', 'month', and 'state', then calculate the mean of 'acpcp'
+rain_df_avg_weekly_state <- rain_df %>%
+  group_by(year, week, state) %>%
+  summarise(acpcp_avg = mean(acpcp, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+#average temperature over each week
+```{r}
+temp_df$date <- as.Date(temp_df$date)
+
+# Create a 'month' column from the 'date' column
+temp_df <- temp_df %>%
+  mutate(week = week(date))
+
+temp_df_avg_weekly_state <- temp_df %>%
+  group_by(year, week, state) %>%
+  summarise(air_avg = mean(air, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+
+#testing out potential temperature bins
+```{r}
+df <- temp_df_avg_weekly_state
+```
+
+```{r}
+#plot histogram of temperature 
+ggplot(df, aes(x = air_avg)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Histogram of Temperature",
+    x = "Temperature",
+    y = "Frequency"
+  )
+
+#breaks <- c(0, 12,14,16,18,20,22,24,26,28,35)
+#labels <- c("t_012", "t_1214","t_1416", "t_1618", "t_1820", "t_2022", "t_2224", "t_2426", "t_2628", "t_2835")
+#breaks <- c(0, 13, 15,17,19,21,23,25,27, 35)
+#labels <- c("t_013", "t_1315", "t_1517", "t_1719", "t_1921", "t_2123", "t_2325", "t_2527", "t_2735")
+breaks <- c(0, 13, 16, 19, 22, 25, 28, 35)
+labels <- c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35")
+
+# Add a column for each range with 1 or 0 based on air_avg
+for (i in seq_along(labels)) {
+  range_name <- labels[i]
+  lower <- breaks[i]
+  upper <- breaks[i + 1]
+  
+  # Create a column for each range
+  df[[range_name]] <- ifelse(
+    df$air_avg >= lower & df$air_avg < upper, 
+    1, 
+    0
+  )
+}
+
+binary_columns <-  labels
+
+count_ones <- colSums(df[binary_columns] == 1)
+
+# Convert the counts to a data frame for plotting
+df_count_ones <- data.frame(column = names(count_ones), count = count_ones)
+
+#plot counts in each temperature bin
+ggplot(df_count_ones, aes(x = column, y = count, fill = column)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "Temperature Bins",
+    x = "Temperature Bin",
+    y = "Count of 1s"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+
+#testing out precip bins
+```{r}
+df <- rain_df_avg_weekly_state
+```
+
+#testing out different bins
+```{r}
+#histogram of precipitation distribution
+ggplot(df, aes(x = acpcp_avg)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Histogram of Precipitation",
+    x = "Precipitation",
+    y = "Frequency"
+  )
+
+#consistent multiplication by 2.5 (ish)
+#breaks <- c(0, 0.01, 0.03, 0.06, 0.16, 0.4, 1, 2.5, 6, 25)
+#labels <- c("p_0_0.01", "p_0.01_0.03", "p_0.03_0.06", "p_0.06_0.16", "p_0.4_1", "p_1_2.5", "p_2.5_6", "p_6_25")
+
+#x10 before 1, double after 1
+#breaks <- c(0, 0.005, 0.05, 0.5, 1, 2, 4, 8, 25)
+#labels <- c("p_0_0.005", "p_0.005_0.05", "p_0.05_0.5", "p_0.5_1", "p_1_2", "p_2_4", "p_4_8", "p_8_25")
+
+#breaks <- c(0, 0.005, 0.05, 0.5, 1.5, 4.5, 25)
+#labels <- c("p_0_0.005", "p_0.005_0.05", "p_0.05_0.5", "p_0.5_1.5", "p_1.5_4.5", "p_4.5_25")
+
+breaks <- c(0, 2,4,6,8,10, 25)
+labels <- c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25")
+
+# Add a column for each range with 1 or 0 based on air_avg
+for (i in seq_along(labels)) {
+  range_name <- labels[i]
+  lower <- breaks[i]
+  upper <- breaks[i + 1]
+  
+  # Create a column for each range
+  df[[range_name]] <- ifelse(
+    df$acpcp_avg >= lower & df$acpcp_avg < upper, 
+    1, 
+    0
+  )
+}
+
+binary_columns <-  labels
+
+count_ones <- colSums(df[binary_columns] == 1)
+
+# Convert the counts to a data frame for plotting
+df_count_ones <- data.frame(column = names(count_ones), count = count_ones)
+
+ggplot(df_count_ones, aes(x = column, y = count, fill = column)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "Precipitation Bins",
+    x = "Precipitation Bins",
+    y = "Count of 1s"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.title = element_text(size = 12)
+  )
+```
+
+
+
+Preparing Data for modeling
+
+#loading datasets. This dataset is a clean version of the hosptialization data that contains aggregated hopstialization counts for each state, week, and year, separated by the major ICD category. These datasets also contain precipitation and temperature data, from current-week climate conditions to a 6-week lag
+```{r}
+# Load the weekly CSV files
+df_infectiousa_weekly <- read.csv("icd_weekly_monthly/df_a_weekly.csv")
+df_pregnancy_weekly <- read.csv("icd_weekly_monthly/df_o_weekly.csv")
+df_respiratory_weekly <- read.csv("icd_weekly_monthly/df_j_weekly.csv")
+df_digestive_weekly <- read.csv("icd_weekly_monthly/df_k_weekly.csv")
+df_infectiousb_weekly <- read.csv("icd_weekly_monthly/df_b_weekly.csv")
+df_injury_weekly <- read.csv("icd_weekly_monthly/df_st_weekly.csv")
+df_f_weekly <- read.csv("icd_weekly_monthly/df_f_weekly.csv")
+df_l_weekly <- read.csv("icd_weekly_monthly/df_l_weekly.csv")
+df_p_weekly <- read.csv("icd_weekly_monthly/df_p_weekly.csv")
+```
+
+```{r}
+dataframes <- list(df_f_weekly, df_l_weekly, df_p_weekly, df_infectiousa_weekly, df_pregnancy_weekly, df_respiratory_weekly, df_digestive_weekly, df_infectiousb_weekly,df_injury_weekly)
+```
+
+#create temperature bins
+```{r}
+# Define breaks and labels
+breaks <- c(0, 13, 16, 19, 22, 25, 28, 35)
+labels <- c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_2835")
+
+# Loop through each dataframe in the list
+for (i in seq_along(dataframes)) {
+  df <- dataframes[[i]]
+  
+  # Apply the bins
+  for (j in seq_along(labels)) {
+    range_name <- labels[j]
+    lower <- breaks[j]
+    upper <- breaks[j + 1]
+    
+    df[[range_name]] <- ifelse(df$temp >= lower & df$temp < upper, 1, 0)
+  }
+  
+  dataframes[[i]] <- df
+}
+```
+
+```{r}
+df_f_weekly <- dataframes[[1]]
+df_l_weekly <- dataframes[[2]]
+df_p_weekly <- dataframes[[3]]
+df_infectiousa_weekly <- dataframes[[4]]
+df_pregnancy_weekly <- dataframes[[5]]
+df_respiratory_weekly <- dataframes[[6]]
+df_digestive_weekly <- dataframes[[7]]
+df_infectiousb_weekly <- dataframes[[8]]
+df_injury_weekly <- dataframes[[9]]
+```
+
+#adding precipitation bins
+```{r}
+# Define breaks and labels
+breaks <- c(0, 2,4,6,8,10, 25)
+labels <- c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25")
+
+# Loop through each dataframe in the list
+for (i in seq_along(dataframes)) {
+  df <- dataframes[[i]]
+  
+  # Apply the transformation
+  for (j in seq_along(labels)) {
+    range_name <- labels[j]
+    lower <- breaks[j]
+    upper <- breaks[j + 1]
+    
+    # Create a column for each range with 1 or 0 based on temp
+    df[[range_name]] <- ifelse(df$precip >= lower & df$precip < upper, 1, 0)
+  }
+  
+  # Save the modified dataframe back into the list
+  dataframes[[i]] <- df
+}
+```
+
+```{r}
+df_f_weekly <- dataframes[[1]]
+df_l_weekly <- dataframes[[2]]
+df_p_weekly <- dataframes[[3]]
+df_infectiousa_weekly <- dataframes[[4]]
+df_pregnancy_weekly <- dataframes[[5]]
+df_respiratory_weekly <- dataframes[[6]]
+df_digestive_weekly <- dataframes[[7]]
+df_infectiousb_weekly <- dataframes[[8]]
+df_injury_weekly <- dataframes[[9]]
+```
+
+#remove weeks 1 and 52 (these weeks contain consistent outliers across different states)
+```{r}
+for (i in seq_along(dataframes)) {
+  df <- dataframes[[i]]
+  df <- df %>% filter(!(week %in% c(1, 52)))
+  dataframes[[i]] <- df
+}
+
+# Save the modified dataframes back to their respective variables
+df_f_weekly <- dataframes[[1]]
+df_l_weekly <- dataframes[[2]]
+df_p_weekly <- dataframes[[3]]
+df_infectiousa_weekly <- dataframes[[4]]
+df_pregnancy_weekly <- dataframes[[5]]
+df_respiratory_weekly <- dataframes[[6]]
+df_digestive_weekly <- dataframes[[7]]
+df_infectiousb_weekly <- dataframes[[8]]
+df_injury_weekly <- dataframes[[9]]
+```
+
+
+Temperature Models (Corresponding to Figure 4)
+
+#Respiratory (ICD J)
+
+#run binned fixed effects regression model for temperature (reference 22-25 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~ t_0_13 + t_13_16 + t_16_19 + t_19_22 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = df_respiratory_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_22_25", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+
+# Modify the 'term' column
+coeff_df_temp$term <- gsub("t_", "", coeff_df_temp$term)  
+coeff_df_temp$term <- gsub("_", "-", coeff_df_temp$term)  
+
+#plot
+ggplot(coeff_df_temp, aes(x = term, y = estimate)) +  
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) +  # Add horizontal line at 0  
+  theme_minimal() +  
+  labs(     
+    x = "Temperature (°C)",     
+    y = "Coefficient Estimate",     
+    title = "Hospitalizations"   
+  ) +   
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +
+  theme(     
+    text = element_text(family = "Arial"),     
+    axis.text.x = element_text(size = 12, hjust = 0.5),  
+    axis.text.y = element_text(size = 12),  
+    axis.title = element_text(size = 12),     
+    axis.text = element_text(size = 14),      
+    plot.title = element_text(size = 20, hjust = 0.5),      
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(),  
+    axis.line = element_line(color = "black", size = 0.5),
+  ) 
+```
+
+#run natural spline model, plot results
+```{r}
+df_respiratory_weekly_no_outliers <- df_respiratory_weekly
+
+# Define the knots
+knots <- c(-12, -9, -6, -3, 0, 3, 6)
+
+#center temp
+df_respiratory_weekly_no_outliers$temp_centered <- df_respiratory_weekly_no_outliers$temp - 22
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_respiratory_weekly_no_outliers)
+
+# Summary of the spline model
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(df_respiratory_weekly_no_outliers$temp), 
+                   to = max(df_respiratory_weekly_no_outliers$temp), length.out = 100)
+
+# create data for plotting
+new_data <- df_respiratory_weekly_no_outliers[rep(1, length(temp_values)), ]  
+
+
+temp_values_centered <- temp_values - 22  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_respiratory_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_respiratory_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_respiratory_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_respiratory_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 22,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Log Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  scale_y_continuous(limits = c(3.25, 3.7)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 3.33
+log_max <- 3.8
+coef_min <- -0.07
+coef_max <- 0.4
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Respiratory System (ICD J)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Digestive (ICD K)
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = df_digestive_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_temp, aes(x = term, y = estimate)) +
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +
+  labs(
+    x = "Temperature Categories",
+    y = "Coefficient Estimate",
+    title = "Log hospitalizations versus temperature"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+```
+
+#run natural spline model, plot results
+```{r}
+df_digestive_weekly_no_outliers <- df_digestive_weekly
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+df_digestive_weekly_no_outliers$temp_centered <- df_digestive_weekly_no_outliers$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_digestive_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(df_digestive_weekly_no_outliers$temp), 
+                   to = max(df_digestive_weekly_no_outliers$temp), length.out = 100)
+
+# create data for plotting
+new_data <- df_digestive_weekly_no_outliers[rep(1, length(temp_values)), ]  
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_digestive_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_digestive_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_digestive_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_digestive_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.6)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 3.45
+log_max <- 3.6
+coef_min <- -0.03
+coef_max <- 0.08
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Digestive System (ICD K)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Pregnancy and Childbirth (ICD O)
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = df_pregnancy_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_temp, aes(x = term, y = estimate)) +
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +
+  labs(
+    x = "Temperature Categories",
+    y = "Coefficient Estimate",
+    title = "Log pregnancy Hospitalizations versus temperature"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+```
+
+#run natural spline model, plot results
+```{r}
+df_pregnancy_weekly_no_outliers <- df_pregnancy_weekly
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+df_pregnancy_weekly_no_outliers$temp_centered <- df_pregnancy_weekly_no_outliers$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_pregnancy_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(df_pregnancy_weekly_no_outliers$temp), 
+                   to = max(df_pregnancy_weekly_no_outliers$temp), length.out = 100)
+
+# create data for plotting
+new_data <- df_pregnancy_weekly_no_outliers[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_pregnancy_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_pregnancy_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_pregnancy_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_pregnancy_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Pregnancy Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Pregnancy Hospitalizations"
+     ,ylim = c(5.2, 5.32)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Pregnancy and Childbirth Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 5.18
+log_max <- 5.32
+coef_min <- -0.035
+coef_max <- 0.08
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Pregnancy and Childbirth (ICD O)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Bacterial/ Protozoal Diseases (ICD A)
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = df_infectiousa_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_temp, aes(x = term, y = estimate)) +
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +
+  labs(
+    x = "Temperature Categories",
+    y = "Coefficient Estimate",
+    title = "Log infectiousa Hospitalizations versus temperature"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+```
+
+#run natural spline model, plot results
+```{r}
+df_infectiousa_weekly_no_outliers <- df_infectiousa_weekly
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+df_infectiousa_weekly_no_outliers$temp_centered <- df_infectiousa_weekly_no_outliers$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_infectiousa_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(df_infectiousa_weekly_no_outliers$temp), 
+                   to = max(df_infectiousa_weekly_no_outliers$temp), length.out = 100)
+
+# create data for plotting
+new_data <- df_infectiousa_weekly_no_outliers[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_infectiousa_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_infectiousa_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_infectiousa_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_infectiousa_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.55)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 1.9
+log_max <- 2.43
+coef_min <- -0.08
+coef_max <- 0.4
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Bacterial/Protozoal Diseases (ICD A)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Viral/Fungal infections (ICD B)
+```{r}
+dataset <- df_infectiousb_weekly
+```
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+# Create a custom function to categorize temperature into bins
+dataset <- dataset %>%
+  mutate(temperature_bin = case_when(
+    temp >= 0 & temp < 13 ~ "0-13",
+    temp >= 13 & temp < 16 ~ "13-16",
+    temp >= 16 & temp < 19 ~ "16-19",
+    temp >= 19 & temp < 22 ~ "19-22",
+    temp >= 22 & temp < 25 ~ "22-25",
+    temp >= 25 & temp < 28 ~ "25-28",
+    temp >= 28 & temp < 35 ~ "28-35",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(temperature_bin) %>%
+  mutate(frequency = n / sum(n))  # Calculate proportion/frequency for each bin
+
+# Create the respiratory hospitalizations plot (plot1)
+plot1 <- ggplot(coeff_df_temp, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +  
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(dataset_freq, aes(x = temperature_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Temperature (°C)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+dataset$temp_centered <- dataset$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(dataset$temp), 
+                   to = max(dataset$temp), length.out = 100)
+
+# create data for plotting
+new_data <- dataset[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]  
+new_data$month <- unique(dataset$month)[1]  
+new_data$year <- unique(dataset$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.55)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 0.80
+log_max <- 1.1
+coef_min <- -0.05
+coef_max <- 0.18
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Viral/Fungal Infections (ICD B)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Injury (ICD S/T)
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = df_injury_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_temp, aes(x = term, y = estimate)) +
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +
+  labs(
+    x = "Temperature Categories",
+    y = "Coefficient Estimate",
+    title = "Log injury Hospitalizations versus temperature"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+```
+
+#run natural spline model, plot results
+```{r}
+df_injury_weekly_no_outliers <- df_injury_weekly
+
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+df_injury_weekly_no_outliers$temp_centered <- df_injury_weekly_no_outliers$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_injury_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(df_injury_weekly_no_outliers$temp), 
+                   to = max(df_injury_weekly_no_outliers$temp), length.out = 100)
+
+# create data for plotting
+new_data <- df_injury_weekly_no_outliers[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_injury_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_injury_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_injury_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_injury_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Injury Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Injury Hospitalizations"
+     ,ylim = c(3.25, 3.6)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Injury Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  #scale_y_continuous(limits = c(3.27, 3.51)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.41
+log_max <- 2.75
+coef_min <- -0.04
+coef_max <- 0.17
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Injury (ICD S/T)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+
+#Mental Disorders (ICD F)
+```{r}
+dataset <- df_f_weekly
+```
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+# Create a custom function to categorize temperature into bins
+dataset <- dataset %>%
+  mutate(temperature_bin = case_when(
+    temp >= 0 & temp < 13 ~ "0-13",
+    temp >= 13 & temp < 16 ~ "13-16",
+    temp >= 16 & temp < 19 ~ "16-19",
+    temp >= 19 & temp < 22 ~ "19-22",
+    temp >= 22 & temp < 25 ~ "22-25",
+    temp >= 25 & temp < 28 ~ "25-28",
+    temp >= 28 & temp < 35 ~ "28-35",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(temperature_bin) %>%
+  mutate(frequency = n / sum(n))  # Calculate proportion/frequency for each bin
+
+# Create the respiratory hospitalizations plot (plot1)
+plot1 <- ggplot(coeff_df_temp, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +  
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(dataset_freq, aes(x = temperature_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Temperature (°C)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+dataset$temp_centered <- dataset$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(dataset$temp), 
+                   to = max(dataset$temp), length.out = 100)
+
+# create data for plotting
+new_data <- dataset[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]  
+new_data$month <- unique(dataset$month)[1]  
+new_data$year <- unique(dataset$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.55)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.77
+log_max <- 3.02
+coef_min <- -0.05
+coef_max <- 0.15
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Mental Disorders (ICD F)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Skin (ICD L)
+```{r}
+dataset <- df_l_weekly
+```
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+# Create a custom function to categorize temperature into bins
+dataset <- dataset %>%
+  mutate(temperature_bin = case_when(
+    temp >= 0 & temp < 13 ~ "0-13",
+    temp >= 13 & temp < 16 ~ "13-16",
+    temp >= 16 & temp < 19 ~ "16-19",
+    temp >= 19 & temp < 22 ~ "19-22",
+    temp >= 22 & temp < 25 ~ "22-25",
+    temp >= 25 & temp < 28 ~ "25-28",
+    temp >= 28 & temp < 35 ~ "28-35",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(temperature_bin) %>%
+  mutate(frequency = n / sum(n))  # Calculate proportion/frequency for each bin
+
+# Create the respiratory hospitalizations plot (plot1)
+plot1 <- ggplot(coeff_df_temp, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +  
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(dataset_freq, aes(x = temperature_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Temperature (°C)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+dataset$temp_centered <- dataset$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(dataset$temp), 
+                   to = max(dataset$temp), length.out = 100)
+
+# create data for plotting
+new_data <- dataset[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]  
+new_data$month <- unique(dataset$month)[1]  
+new_data$year <- unique(dataset$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.55)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 1.37
+log_max <- 1.68
+coef_min <- -0.03
+coef_max <- 0.18
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Skin (ICD L)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Perinatal Period (ICD P)
+```{r}
+dataset <- df_p_weekly
+```
+
+#run binned fixed effects regression model for temperature (reference 0-13 degrees celsius), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  t_13_16 + t_16_19 + t_19_22 + t_22_25 + t_25_28 + t_28_35 + precip | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the temperature categories 
+coeff_df_temp <- coeff_df[grepl("^t_", coeff_df$term), ]
+
+# Ensure the temperature categories are ordered numerically 
+coeff_df_temp$term <- factor(coeff_df_temp$term, 
+                              levels = c("t_0_13", "t_13_16", "t_16_19", "t_19_22", "t_22_25", "t_25_28", "t_28_35"))
+
+# Add a point for omitted category
+coeff_df_temp <- rbind(coeff_df_temp, data.frame(
+  term = "t_0_13", 
+  estimate = 0, 
+  std_error = NA, 
+  lower_ci = NA, 
+  upper_ci = NA
+))
+# Create a custom function to categorize temperature into bins
+dataset <- dataset %>%
+  mutate(temperature_bin = case_when(
+    temp >= 0 & temp < 13 ~ "0-13",
+    temp >= 13 & temp < 16 ~ "13-16",
+    temp >= 16 & temp < 19 ~ "16-19",
+    temp >= 19 & temp < 22 ~ "19-22",
+    temp >= 22 & temp < 25 ~ "22-25",
+    temp >= 25 & temp < 28 ~ "25-28",
+    temp >= 28 & temp < 35 ~ "28-35",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(temperature_bin) %>%
+  mutate(frequency = n / sum(n))  # Calculate proportion/frequency for each bin
+
+# Create the respiratory hospitalizations plot (plot1)
+plot1 <- ggplot(coeff_df_temp, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +  
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(dataset_freq, aes(x = temperature_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Temperature (°C)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-9, -6, -3, 0, 3, 6, 9)
+
+# center temp
+dataset$temp_centered <- dataset$temp - 19
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(temp_centered, knots = knots) + precip + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+temp_values <- seq(from = min(dataset$temp), 
+                   to = max(dataset$temp), length.out = 100)
+
+# create data for plotting
+new_data <- dataset[rep(1, length(temp_values)), ]  
+
+
+
+temp_values_centered <- temp_values - 19  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$temp_centered <- temp_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]  
+new_data$month <- unique(dataset$month)[1]  
+new_data$year <- unique(dataset$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$temp_spline <- ns(new_data$temp_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$temp_centered + 19, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Temperature",
+     xlab = "Temperature", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.55)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$temp_centered + 19, rev(new_data$temp_centered + 19)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$temp_centered + 19, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  temp = new_data$temp_centered + 19,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = temp)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Temperature (°C)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(10, 30)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+```
+
+#plot both models together
+```{r}
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    temp_mean = case_when(
+      term == "t_0_13" ~ 11.5,
+      term == "t_13_16" ~ 14.5,
+      term == "t_16_19" ~ 17.5,
+      term == "t_19_22" ~ 20.5,
+      term == "t_22_25" ~ 23.5,
+      term == "t_25_28" ~ 26.5,
+      term == "t_28_35" ~ 29.5
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.9
+log_max <- 3.16
+coef_min <- -0.05
+coef_max <- 0.18
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_temp <- coeff_df_temp %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+    geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = temp, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = temp, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_temp, aes(x = temp_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_temp, aes(x = temp_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(T))"
+    )
+  ) +
+  scale_x_continuous(limits = c(10, 31)) +
+  labs(title = "Perinatal Period (ICD P)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = temp)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(10, 13, 16, 19, 22, 25, 28, 31),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Temperature (°C)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(10, 31),
+    breaks = seq(10, 31, by = 3)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.06, by = 0.06),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+Temperature Lag Models (Corresponding to Supplemental Figure 2)
+
+#loop to plot linear fixed effect regression models for lags 0 - 6 weeks for all major ICD categories
+```{r}
+datasets <- list(
+  a = df_infectiousa_weekly,
+  b = df_infectiousb_weekly,
+  f = df_f_weekly,
+  k = df_digestive_weekly,
+  l = df_l_weekly,
+  o = df_pregnancy_weekly,
+  p = df_p_weekly,
+  st = df_injury_weekly
+)
+
+titles <- list(
+  a = "Bacterial/Protozoal Diseases (ICD A)",
+  b = "Viral/Fungal Infections (ICD B)",
+  f = "Mental Disorders (ICD F)",
+  k = "Digestive System (ICD K)",
+  l = "Skin (ICD L)",
+  o = "Pregnancy and Childbirth (ICD O)",
+  p = "Perinatal Period (ICD P)",
+  st = "Injury (S/T)"
+)
+
+lag_map <- c(
+  "temp" = "Lag 0",
+  "temp_lag_1" = "Lag 1",
+  "temp_lag_2" = "Lag 2",
+  "temp_lag_3" = "Lag 3",
+  "temp_lag_4" = "Lag 4",
+  "temp_lag_5" = "Lag 5",
+  "temp_lag_6" = "Lag 6"
+)
+
+# Store plots
+plot_list <- list()
+
+# Loop through datasets
+for (cat in names(datasets)) {
+  df <- datasets[[cat]]
+
+  models <- lapply(0:6, function(i) {
+    temp_var <- ifelse(i == 0, "temp", paste0("temp_lag_", i))
+    formula <- as.formula(paste("log_cases ~", temp_var, "+ precip | state + month + year | 0 | state"))
+    felm(formula, data = df)
+  })
+
+  coefs <- lapply(0:6, function(i) {
+    temp_var <- ifelse(i == 0, "temp", paste0("temp_lag_", i))
+    coef_info <- summary(models[[i + 1]])$coef[temp_var, ]
+    data.frame(
+      term = temp_var,
+      estimate = coef_info[1],
+      std_error = coef_info[2],
+      lower_ci = coef_info[1] - 1.96 * coef_info[2],
+      upper_ci = coef_info[1] + 1.96 * coef_info[2]
+    )
+  })
+
+  coeff_df <- bind_rows(coefs)
+  coeff_df$term <- sapply(coeff_df$term, function(x) lag_map[x])
+
+  p <- ggplot(coeff_df, aes(x = term, y = estimate)) +
+    geom_point(size = 0.7) +
+    geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2, linewidth = 0.25) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.25)  +
+    labs(
+      x = "Temperature Lags",
+      y = "Coefficient Estimate (βf(T))",
+      title = titles[[cat]]
+    ) +
+    scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "Arial"),
+      axis.text.x = element_text(size = 5, hjust = 0.5),
+      axis.text.y = element_text(size = 4),
+      axis.title.y = element_text(size = 5),
+      axis.title.x = element_text(size = 8),
+      axis.text = element_text(size = 4),
+      plot.title = element_text(size = 8, hjust = 0.5),
+      plot.margin = margin(10, 10, 10, 10),
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", size = 0.5)
+    )
+
+  plot_list[[cat]] <- p
+}
+
+# Combine plots (3 columns)
+wrap_plots(plot_list, ncol = 3)
+```
+
+
+
+Precipitation Models (Corresponding to Figure 5)
+
+#Respiratory (ICD J)
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = df_respiratory_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_rain, aes(x = term, y = estimate)) +  
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +  
+  labs(
+    x = "Precipitation Categories",
+    y = "Coefficient Estimate",
+    title = "Log Respiratory Hospitalizations versus precipitation"
+  ) +  
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+#run natural spline model, plot results
+```{r}
+
+df_respiratory_weekly_no_outliers <- df_respiratory_weekly
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# center temp
+df_respiratory_weekly_no_outliers$precip_centered <- df_respiratory_weekly_no_outliers$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_respiratory_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+precip_values <- seq(from = min(df_respiratory_weekly_no_outliers$precip), 
+                   to = max(df_respiratory_weekly_no_outliers$precip), length.out = 100)
+
+# create data for plotting
+new_data <- df_respiratory_weekly_no_outliers[rep(1, length(precip_values)), ]  
+
+
+
+precip_values_centered <- precip_values - 6  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_respiratory_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_respiratory_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_respiratory_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_respiratory_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted respiratory Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log respiratory Hospitalizations"
+     ,ylim = c(3.3, 3.8)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  #scale_y_continuous(limits = c(1.9, 2.4)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 3.4
+log_max <- 3.7
+coef_min <- -0.1
+coef_max <- 0.25
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Respiratory (ICD J)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Temperature"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Digestive (ICD K)
+
+#run binned fixed effects regression model for precipitation (reference 10 mm +), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_0_2 + p_2_4 + p_4_6 + p_6_8 + p_8_10 +temp | state + month + year | 0 | state, data = df_digestive_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_10_25",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_rain, aes(x = term, y = estimate)) +  
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +  
+  labs(
+    x = "Precipitation Categories",
+    y = "Coefficient Estimate",
+    title = "Log digestive Hospitalizations versus precipitation"
+  ) +  
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+#run natural spline model, plot results
+```{r}
+df_digestive_weekly_no_outliers <- df_digestive_weekly
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# center temp
+df_digestive_weekly_no_outliers$precip_centered <- df_digestive_weekly_no_outliers$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_digestive_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+precip_values <- seq(from = min(df_digestive_weekly_no_outliers$precip), 
+                   to = max(df_digestive_weekly_no_outliers$precip), length.out = 100)
+
+# create data for plotting
+new_data <- df_digestive_weekly_no_outliers[rep(1, length(precip_values)), ]  
+
+
+
+precip_values_centered <- precip_values - 6  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_digestive_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_digestive_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_digestive_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_digestive_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted digestiveHospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  #scale_y_continuous(limits = c(1.9, 2.4)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 3.46
+log_max <- 3.59
+coef_min <- -0.05
+coef_max <- 0.08
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Digestive (ICD K)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Pregnancy and Childbirth (ICD O)
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = df_pregnancy_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_rain, aes(x = term, y = estimate)) +  
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +  
+  labs(
+    x = "Precipitation Categories",
+    y = "Coefficient Estimate",
+    title = "Log pregnancy Hospitalizations versus precipitation"
+  ) +  
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# center temp
+df_pregnancy_weekly_no_outliers$precip_centered <- df_pregnancy_weekly_no_outliers$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_pregnancy_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+precip_values <- seq(from = min(df_pregnancy_weekly_no_outliers$precip), 
+                   to = max(df_pregnancy_weekly_no_outliers$precip), length.out = 100)
+
+# create data for plotting
+new_data <- df_pregnancy_weekly_no_outliers[rep(1, length(precip_values)), ]  
+
+
+
+precip_values_centered <- precip_values - 6  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_pregnancy_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_pregnancy_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_pregnancy_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_pregnancy_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted pregnancy Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log pregnancy Hospitalizations"
+     ,ylim = c(5.1, 5.4)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Pregnancy and Childbirth Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 5.19
+log_max <- 5.31
+coef_min <- -0.03
+coef_max <- 0.06
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Pregnancy and Childbirth (ICD O)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Bacterial and Protozoal Diseases (ICD A)
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = df_infectiousa_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_rain, aes(x = term, y = estimate)) +  
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +  
+  labs(
+    x = "Precipitation Categories",
+    y = "Coefficient Estimate",
+    title = "Log infectious A Hospitalizations versus precipitation"
+  ) +  
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+#run natural spline model, plot results
+```{r}
+df_infectiousa_weekly_no_outliers <- df_infectiousa_weekly
+# Define the knots
+knots <- c(-4,-2,0,2,4)
+
+# center temp
+df_infectiousa_weekly_no_outliers$precip_centered <- df_infectiousa_weekly_no_outliers$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'temp'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = df_infectiousa_weekly_no_outliers)
+
+summary(spline3)
+
+# Define a sequence of 'temp' values from min to max
+precip_values <- seq(from = min(df_infectiousa_weekly_no_outliers$precip), 
+                   to = max(df_infectiousa_weekly_no_outliers$precip), length.out = 100)
+
+# create data for plotting
+new_data <- df_infectiousa_weekly_no_outliers[rep(1, length(precip_values)), ]  
+
+
+
+precip_values_centered <- precip_values - 6  # Center the temp for prediction
+
+# Assign the centered 'temp' values to the dataset
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant
+new_data$precip <- mean(df_infectiousa_weekly_no_outliers$precip, na.rm = TRUE) 
+new_data$state <- unique(df_infectiousa_weekly_no_outliers$state)[1]  
+new_data$month <- unique(df_infectiousa_weekly_no_outliers$month)[1]  
+new_data$year <- unique(df_infectiousa_weekly_no_outliers$year)[1]  
+
+# Add the natural spline term for the centered 'temp' 
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions with 95% confidence intervals
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values and the confidence intervals
+predicted_values <- predictions_with_ci[, "fit"]  
+lower_ci <- predictions_with_ci[, "lwr"]         
+upper_ci <- predictions_with_ci[, "upr"]         
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Infectious Disease Hospitalizations vs. Precipitation (Lag 2)",
+     xlab = "Precipitation (Lag 2)", ylab = "Log Infecitous Disease Hospitalizations"
+     ,ylim = c(1.8, 2.6)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  scale_y_continuous(limits = c(1.9, 2.4)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 1.9
+log_max <- 2.35
+coef_min <- -0.08
+coef_max <- 0.30
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Bacterial/Protozoal Disease (ICD A)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Injury (ICD S/T)
+
+#run binned fixed effects regression model for precipitation (reference 10 mm + ), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_0_2 + p_2_4 + p_4_6 + p_6_8 + p_8_10 + temp | state + month + year | 0 | state, data = df_injury_weekly)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_10_25",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# Plot the coefficients with confidence intervals
+ggplot(coeff_df_rain, aes(x = term, y = estimate)) +  
+  geom_point() +  
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # add horizontal line at 0
+  theme_minimal() +  
+  labs(
+    x = "precipitation Categories",
+    y = "Coefficient Estimate",
+    title = "Log injury Hospitalizations versus precipitation"
+  ) +  
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),  
+    axis.title = element_text(size = 12)
+  )
+
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# Center 'precip' at 6 mm
+dataset$precip_centered <- dataset$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'precip'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'precip' values from min to max
+precip_values <- seq(from = min(dataset$precip), 
+                   to = max(dataset$precip), length.out = 100)
+
+# create data to plot
+new_data <- dataset[rep(1, length(precip_values)), ]
+precip_values_centered <- precip_values - 6  # Center the precip for prediction
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant 
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]
+new_data$month <- unique(dataset$month)[1]
+new_data$year <- unique(dataset$year)[1] 
+
+# Add the natural spline term for the centered 'precip'
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values
+predicted_values <- predictions_with_ci[, "fit"]
+lower_ci <- predictions_with_ci[, "lwr"]
+upper_ci <- predictions_with_ci[, "upr"] 
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.35
+log_max <- 2.62
+coef_min <- -0.03
+coef_max <- 0.13
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Injury (ICD S/T)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Viral and Fungal Infections (ICD B)
+```{r}
+dataset <- df_infectiousb_weekly
+```
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# categorize precip into bins
+dataset <- dataset %>%
+  mutate(precip_bin = case_when(
+    precip >= 0 & precip < 2 ~ "0-2",
+    precip >= 2 & precip < 4 ~ "2-4",
+    precip >= 4 & precip < 6 ~ "4-6",
+    precip >= 6 & precip < 8 ~ "6-8",
+    precip >= 8 & precip < 10 ~ "8-10",
+    precip >= 10 & precip < 25 ~ "10-25",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(precip_bin) %>%
+  mutate(frequency = n / sum(n))
+
+dataset_freq$precip_bin <- factor(dataset_freq$precip_bin, 
+                                                levels = c("0-2", "2-4", "4-6", "6-8", "8-10", "10-25"))
+
+# Create the plot
+plot1 <- ggplot(coeff_df_rain, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) + 
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot for precipitation
+plot2 <- ggplot(dataset_freq, aes(x = precip_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 2)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# Center 'precip' at 6 mm
+dataset$precip_centered <- dataset$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'precip'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'precip' values from min to max
+precip_values <- seq(from = min(dataset$precip), 
+                   to = max(dataset$precip), length.out = 100)
+
+# create data to plot
+new_data <- dataset[rep(1, length(precip_values)), ]
+precip_values_centered <- precip_values - 6  # Center the precip for prediction
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant 
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]
+new_data$month <- unique(dataset$month)[1]
+new_data$year <- unique(dataset$year)[1] 
+
+# Add the natural spline term for the centered 'precip'
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values
+predicted_values <- predictions_with_ci[, "fit"]
+lower_ci <- predictions_with_ci[, "lwr"]
+upper_ci <- predictions_with_ci[, "upr"] 
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 0.75
+log_max <- 1.07
+coef_min <- -0.07
+coef_max <- 0.13
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Viral/Fungal Infections (ICD B)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+#Mental Disorders (ICD F)
+```{r}
+dataset <- df_f_weekly
+```
+
+#run binned fixed effects regression model for precipitation (reference 10 mm +), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_0_2 + p_2_4 + p_4_6 + p_6_8 + p_8_10 + temp | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_10_25",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# categorize precip into bins
+dataset <- dataset %>%
+  mutate(precip_bin = case_when(
+    precip >= 0 & precip < 2 ~ "0-2",
+    precip >= 2 & precip < 4 ~ "2-4",
+    precip >= 4 & precip < 6 ~ "4-6",
+    precip >= 6 & precip < 8 ~ "6-8",
+    precip >= 8 & precip < 10 ~ "8-10",
+    precip >= 10 & precip < 25 ~ "10-25",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(precip_bin) %>%
+  mutate(frequency = n / sum(n))
+
+dataset_freq$precip_bin <- factor(dataset_freq$precip_bin, 
+                                                levels = c("0-2", "2-4", "4-6", "6-8", "8-10", "10-25"))
+
+# Create the plot
+plot1 <- ggplot(coeff_df_rain, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) + 
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot for precipitation
+plot2 <- ggplot(dataset_freq, aes(x = precip_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 2)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# Center 'precip' at 6 mm
+dataset$precip_centered <- dataset$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'precip'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'precip' values from min to max
+precip_values <- seq(from = min(dataset$precip), 
+                   to = max(dataset$precip), length.out = 100)
+
+# create data to plot
+new_data <- dataset[rep(1, length(precip_values)), ]
+precip_values_centered <- precip_values - 6  # Center the precip for prediction
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant 
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]
+new_data$month <- unique(dataset$month)[1]
+new_data$year <- unique(dataset$year)[1] 
+
+# Add the natural spline term for the centered 'precip'
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values
+predicted_values <- predictions_with_ci[, "fit"]
+lower_ci <- predictions_with_ci[, "lwr"]
+upper_ci <- predictions_with_ci[, "upr"] 
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  #scale_y_continuous(limits = c(1.9, 2.4)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.72
+log_max <- 3.0
+coef_min <- -0.09
+coef_max <- 0.18
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Mental Disorders (ICD F)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Skin (ICD L)
+```{r}
+dataset <- df_l_weekly
+```
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),                  
+  estimate = coefficients[, 1],                   
+  std_error = coefficients[, 2],                  
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],  
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2]   
+)
+
+# Filter only the precipitation categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precipitation categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))  
+
+# Add a point for omitted category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# categorize precip into bins
+dataset <- dataset %>%
+  mutate(precip_bin = case_when(
+    precip >= 0 & precip < 2 ~ "0-2",
+    precip >= 2 & precip < 4 ~ "2-4",
+    precip >= 4 & precip < 6 ~ "4-6",
+    precip >= 6 & precip < 8 ~ "6-8",
+    precip >= 8 & precip < 10 ~ "8-10",
+    precip >= 10 & precip < 25 ~ "10-25",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(precip_bin) %>%
+  mutate(frequency = n / sum(n))
+
+dataset_freq$precip_bin <- factor(dataset_freq$precip_bin, 
+                                                levels = c("0-2", "2-4", "4-6", "6-8", "8-10", "10-25"))
+
+# Create the plot
+plot1 <- ggplot(coeff_df_rain, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) + 
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot for precipitation
+plot2 <- ggplot(dataset_freq, aes(x = precip_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 2)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# Center 'precip' at 6 mm
+dataset$precip_centered <- dataset$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'precip'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'precip' values from min to max
+precip_values <- seq(from = min(dataset$precip), 
+                   to = max(dataset$precip), length.out = 100)
+
+# create data to plot
+new_data <- dataset[rep(1, length(precip_values)), ]
+precip_values_centered <- precip_values - 6  # Center the precip for prediction
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant 
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]
+new_data$month <- unique(dataset$month)[1]
+new_data$year <- unique(dataset$year)[1] 
+
+# Add the natural spline term for the centered 'precip'
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values
+predicted_values <- predictions_with_ci[, "fit"]
+lower_ci <- predictions_with_ci[, "lwr"]
+upper_ci <- predictions_with_ci[, "upr"] 
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 1.37
+log_max <- 1.57
+coef_min <- -0.08
+coef_max <- 0.10
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Skin (ICD L)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),         
+    axis.text.x = element_blank(),          
+    axis.ticks.x = element_blank(),         
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12),  
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),         
+    axis.text.y = element_text(size = 12, color = "grey40"),          
+    axis.ticks.y = element_line(color = "black", size = 0.25),        
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+#Perinatal Period (ICD P)
+```{r}
+dataset <- df_p_weekly
+```
+
+#run binned fixed effects regression model for precipitation (reference 0-2 mm), plot results
+```{r}
+# Fit the model
+model <- felm(log_cases ~  p_2_4 + p_4_6 + p_6_8 + p_8_10 + p_10_25 + temp | state + month + year | 0 | state, data = dataset)
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and standard errors
+coefficients <- summary(model)$coefficients
+
+# Create a data frame for plotting
+coeff_df <- data.frame(
+  term = rownames(coefficients),            
+  estimate = coefficients[, 1],              
+  std_error = coefficients[, 2],               
+  lower_ci = coefficients[, 1] - 1.96 * coefficients[, 2],
+  upper_ci = coefficients[, 1] + 1.96 * coefficients[, 2] 
+)
+
+# Filter only the precip categories
+coeff_df_rain <- coeff_df[grepl("^p_", coeff_df$term), ]
+
+# Ensure the precip categories are ordered correctly
+coeff_df_rain$term <- factor(coeff_df_rain$term, 
+                              levels = c("p_0_2", "p_2_4", "p_4_6", "p_6_8", "p_8_10","p_10_25"))
+
+# Add a point for excluded category
+coeff_df_rain <- rbind(coeff_df_rain, data.frame(
+  term = "p_0_2",    
+  estimate = 0,    
+  std_error = NA,    
+  lower_ci = NA,    
+  upper_ci = NA
+))
+
+# Convert to numeric
+coeff_df_rain$estimate <- as.numeric(coeff_df_rain$estimate)
+coeff_df_rain$lower_ci <- as.numeric(coeff_df_rain$lower_ci)
+coeff_df_rain$upper_ci <- as.numeric(coeff_df_rain$upper_ci)
+
+# categorize precip into bins
+dataset <- dataset %>%
+  mutate(precip_bin = case_when(
+    precip >= 0 & precip < 2 ~ "0-2",
+    precip >= 2 & precip < 4 ~ "2-4",
+    precip >= 4 & precip < 6 ~ "4-6",
+    precip >= 6 & precip < 8 ~ "6-8",
+    precip >= 8 & precip < 10 ~ "8-10",
+    precip >= 10 & precip < 25 ~ "10-25",
+    TRUE ~ "Other"
+  ))
+
+# Count the number of observations in each bin and calculate the frequency
+dataset_freq <- dataset %>%
+  count(precip_bin) %>%
+  mutate(frequency = n / sum(n))
+
+dataset_freq$precip_bin <- factor(dataset_freq$precip_bin, 
+                                                levels = c("0-2", "2-4", "4-6", "6-8", "8-10", "10-25"))
+
+# Create the plot
+plot1 <- ggplot(coeff_df_rain, aes(x = term, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.5) + 
+  theme_minimal() + 
+  labs(
+    y = "Coefficient Estimate", 
+    title = "Hospitalizations"
+  ) + 
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) + 
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_blank(), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.y = element_text(size = 16), 
+    axis.title.x = element_blank(), 
+    plot.title = element_text(size = 20, hjust = 0.5), 
+    plot.margin = margin(10, 10, 10, 10), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Create the histogram plot for precipitation
+plot2 <- ggplot(dataset_freq, aes(x = precip_bin, y = frequency)) + 
+  geom_bar(stat = "identity", fill = "steelblue", color = "black", alpha = 0.5) + 
+  theme_minimal() + 
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Frequency"
+  ) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 2)) +
+  theme(
+    text = element_text(family = "Arial"), 
+    axis.text.x = element_text(size = 16, hjust = 0.5), 
+    axis.text.y = element_text(size = 12), 
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 12), 
+    plot.title = element_blank(), 
+    panel.grid.major.y = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(color = "black", size = 0.5),
+    axis.ticks.y = element_line(color = "black", size = 0.25)
+  )
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))
+
+# Print the combined plot
+print(combined_plot)
+```
+
+#run natural spline model, plot results
+```{r}
+# Define the knots
+knots <- c(-4, -2, 0, 2, 4)
+
+# Center 'precip' at 6 mm
+dataset$precip_centered <- dataset$precip - 6
+
+# Fit the model with a natural cubic spline for the centered 'precip'
+spline3 <- lm(log_cases ~ ns(precip_centered, knots = knots) + temp + as.factor(state) + as.factor(month) + as.factor(year), 
+              data = dataset)
+
+summary(spline3)
+
+# Define a sequence of 'precip' values from min to max
+precip_values <- seq(from = min(dataset$precip), 
+                   to = max(dataset$precip), length.out = 100)
+
+# create data to plot
+new_data <- dataset[rep(1, length(precip_values)), ]
+precip_values_centered <- precip_values - 6  # Center the precip for prediction
+new_data$precip_centered <- precip_values_centered
+
+# Hold other variables constant 
+new_data$precip <- mean(dataset$precip, na.rm = TRUE) 
+new_data$state <- unique(dataset$state)[1]
+new_data$month <- unique(dataset$month)[1]
+new_data$year <- unique(dataset$year)[1] 
+
+# Add the natural spline term for the centered 'precip'
+new_data$precip_spline <- ns(new_data$precip_centered, knots = knots)
+
+# Generate predictions
+predictions_with_ci <- predict(spline3, newdata = new_data, interval = "confidence", level = 0.95)
+
+# Extract predicted values
+predicted_values <- predictions_with_ci[, "fit"]
+lower_ci <- predictions_with_ci[, "lwr"]
+upper_ci <- predictions_with_ci[, "upr"] 
+
+# Plot the predictions with the confidence intervals
+plot(new_data$precip_centered + 6, predicted_values, type = "l", main = "Predicted Hospitalizations vs. Precipitation",
+     xlab = "Precipitation", ylab = "Log Hospitalizations"
+     ,ylim = c(3.4, 3.7)
+     )  
+
+# Add the shaded region for the 95% CI
+polygon(c(new_data$precip_centered + 6, rev(new_data$precip_centered + 6)),
+        c(lower_ci, rev(upper_ci)),
+        col = "gray", border = NA)  # Gray shading for CI
+
+# Add the predicted values as a line
+lines(new_data$precip_centered + 6, predicted_values, col = "black", lwd = 1)
+
+# Create a data frame for ggplot
+plot_data <- data.frame(
+  precip = new_data$precip_centered + 6,  # Undo centering
+  predicted_values = predicted_values,
+  lower_ci = lower_ci,
+  upper_ci = upper_ci
+)
+
+# plot the model
+ggplot(plot_data, aes(x = precip)) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.5) +  # 95% CI shading
+  geom_line(aes(y = predicted_values), color = "black", size = 0.5) +   line
+  labs(
+    x = "Precipitation (mm)", 
+    y = "Predicted Hospitalizations", 
+    title = "Hospitalizations"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 13)) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 16),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+```
+
+#plot both models together
+```{r}
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    precip_mean = case_when(
+      term == "p_0_2" ~ 1,
+      term == "p_2_4" ~ 3,
+      term == "p_4_6" ~ 5,
+      term == "p_6_8" ~ 7,
+      term == "p_8_10" ~ 9,
+      term == "p_10_25" ~ 11
+    )
+  )
+
+# code to plot the two models
+# Mapping coef range onto log hosp range
+log_min <- 2.89
+log_max <- 3.07
+coef_min <- -0.05
+coef_max <- 0.10
+
+# Calculate scale transformation
+a <- (log_max - log_min) / (coef_max - coef_min)
+b <- log_min - a * coef_min
+
+# Transform coefficient estimates
+coeff_df_rain <- coeff_df_rain %>%
+  mutate(
+    transformed_estimate = a * estimate + b,
+    transformed_lower = a * lower_ci + b,
+    transformed_upper = a * upper_ci + b
+  )
+
+# Build the plot
+plot1 <- ggplot() +
+  geom_hline(yintercept = b, linetype = "dashed", color = "black", size = 0.7) +  # Add horizontal line at 0 
+  # Spline prediction line with confidence interval
+  geom_line(data = plot_data, aes(x = precip, y = predicted_values), color = "black") +
+  geom_ribbon(data = plot_data, aes(x = precip, ymin = lower_ci, ymax = upper_ci), fill = "gray", alpha = 0.4) +
+
+  # Coefficient estimates (transformed to log scale)
+  geom_point(data = coeff_df_rain, aes(x = precip_mean, y = transformed_estimate), color = "darkolivegreen4", size = 1.7) +
+  geom_errorbar(data = coeff_df_rain, aes(x = precip_mean, ymin = transformed_lower, ymax = transformed_upper), 
+                width = 0.7, size = 0.85, color = "darkolivegreen4") +
+
+  # Dual y-axis
+  scale_y_continuous(
+    name = "Log Hospitalizations",
+    limits = c(log_min, log_max),
+    sec.axis = sec_axis(
+      trans = ~ (. - b) / a,
+      name = "Coefficient Estimate (βf(P))"
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 12)) +
+  labs(title = "Perinatal Period (ICD P)")  +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.title = element_text(size = 17),
+    axis.title.x = element_blank(),     
+    axis.text.x = element_blank(),  
+    axis.ticks.x = element_blank(),        
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 28, hjust = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Create the histogram plot with frequency (proportion) on the y-axis
+plot2 <- ggplot(df_respiratory_weekly, aes(x = precip)) +
+  geom_histogram(
+    aes(y = ..density..),
+    breaks = c(0,2,4,6,8,10,12), 
+    fill = "steelblue",
+    color = "black",
+    alpha = 0.5
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Frequency",
+    title = "Density Plot of Precipitation"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 12),
+    breaks = seq(0, 12, by = 2)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, by = 0.4),  # Left y-axis only
+    name = "Frequency"
+  ) +
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(size = 14, hjust = 0.5),
+    axis.title.x = element_text(size = 18),
+    axis.title.y = element_text(size = 12, color = "grey40"),        
+    axis.text.y = element_text(size = 12, color = "grey40"),         
+    axis.ticks.y = element_line(color = "black", size = 0.25),    
+    plot.title = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5)
+  )
+
+
+# Combine the two plots
+combined_plot <- plot1 / plot2 + plot_layout(heights = c(7, 1))  # Adjust heights so histogram is shorter
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+
+Precipitation Lag Models (Corresponding to Supplemental Figure 3)
+
+#loop to plot linear fixed effect regression models for lags 0 - 6 weeks for all major ICD categories
+```{r}
+datasets <- list(
+  a = df_infectiousa_weekly,
+  b = df_infectiousb_weekly,
+  f = df_f_weekly,
+  j = df_respiratory_weekly,
+  k = df_digestive_weekly,
+  l = df_l_weekly,
+  o = df_pregnancy_weekly,
+  p = df_p_weekly,
+  st = df_injury_weekly
+)
+
+titles <- list(
+  a = "Bacterial/Protozoal Diseases (ICD A)",
+  b = "Viral/Fungal Infections (ICD B)",
+  f = "Mental Disorders (ICD F)",
+  j = "Respiratory System (ICD J)",
+  k = "Digestive System (ICD K)",
+  l = "Skin (ICD L)",
+  o = "Pregnancy and Childbirth (ICD O)",
+  p = "Perinatal Period (ICD P)",
+  st = "Injury (S/T)"
+)
+
+lag_map <- c(
+  "precip" = "Lag 0",
+  "precip_lag_1" = "Lag 1",
+  "precip_lag_2" = "Lag 2",
+  "precip_lag_3" = "Lag 3",
+  "precip_lag_4" = "Lag 4",
+  "precip_lag_5" = "Lag 5",
+  "precip_lag_6" = "Lag 6"
+)
+
+# Store all plots
+plot_list <- list()
+
+for (cat in names(datasets)) {
+  df <- datasets[[cat]]
+
+  models <- lapply(0:6, function(i) {
+    precip_var <- ifelse(i == 0, "precip", paste0("precip_lag_", i))
+    formula <- as.formula(paste("log_cases ~ temp +", precip_var, "| state + month + year | 0 | state"))
+    felm(formula, data = df)
+  })
+
+  coefs <- lapply(0:6, function(i) {
+    var_name <- ifelse(i == 0, "precip", paste0("precip_lag_", i))
+    coef_info <- summary(models[[i + 1]])$coef[var_name, ]
+    data.frame(
+      term = var_name,
+      estimate = coef_info[1],
+      std_error = coef_info[2],
+      lower_ci = coef_info[1] - 1.96 * coef_info[2],
+      upper_ci = coef_info[1] + 1.96 * coef_info[2]
+    )
+  })
+
+  coeff_df <- bind_rows(coefs)
+  coeff_df$term <- sapply(coeff_df$term, function(x) lag_map[x])
+
+  p <- ggplot(coeff_df, aes(x = term, y = estimate)) +
+    geom_point(size = 0.7) +
+    geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2, linewidth = 0.25) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red4", size = 0.25) +
+    theme_minimal() +
+    labs(
+      x = "Precipitation Lags",
+      y = "Coefficient Estimate (βf(P))",
+      title = titles[[cat]]
+    ) +
+    scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +
+    theme(
+      text = element_text(family = "Arial"),
+      axis.text.x = element_text(size = 5, hjust = 0.5),
+      axis.text.y = element_text(size = 4),
+      axis.title.y = element_text(size = 5),
+      axis.title.x = element_text(size = 8),
+      axis.text = element_text(size = 4),
+      plot.title = element_text(size = 8, hjust = 0.5),
+      plot.margin = margin(10, 10, 10, 10),
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", size = 0.5)
+    )
+
+  plot_list[[cat]] <- p
+}
+
+# Combine and display all plots in 3 columns
+wrap_plots(plot_list, ncol = 3)
+```
+
+
+
