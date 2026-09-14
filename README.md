@@ -1,6 +1,6 @@
 # Climate-Influences-on-Hospitalization-Patterns-in-Mexico
 
-This directory has the code needed to replicate the analysis in "Climate Influences on Hospitalization Patterns in Mexico: Evidence from 30 Million Records" by Ury et al. link: https://doi.org/10.1088/2515-7620/ae37d9
+This directory has the code needed to replicate the analysis in "Climate Influences on Hospitalization Patterns in Mexico: Evidence from 30 Million Records" by Ury et al. (https://doi.org/10.1088/2515-7620/ae37d9)
 
 To replicate the results and run the scripts, the following data is required:
 
