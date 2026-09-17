@@ -1,6 +1,9 @@
 # Climate-Influences-on-Hospitalization-Patterns-in-Mexico
 
-This directory has the code needed to replicate the analysis in "Climate Influences on Hospitalization Patterns in Mexico: Evidence from 30 Million Records" by Ury et al. (https://doi.org/10.1088/2515-7620/ae37d9)
+This directory contains the code for conducting seasonality analyses (wavelet power spectrum, Fourier transformation) and identifying meteorological drivers (fixed-effects and generalized additive models) of hospitalizations across ICD categories, using a country-wide dataset of public hospitalizations in Mexico.
+
+More details can be found in the 2026 publication:
+Ury B, Stamper AR, Baker RE. Environmental Research Communications. "Climate Influences on Hospitalization Patterns in Mexico: Evidence from 30 Million Records" doi: https://doi.org/10.1088/2515-7620/ae37d9
 
 To replicate the results and run the scripts, the following data is required:
 
